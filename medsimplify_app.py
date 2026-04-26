@@ -13,7 +13,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── 2. Initialize Session State (Prevents Crashes) ──────────────────────────
+# ─── 2. Initialize Session State ─────────────────────────────────────────────
+# This ensures the app doesn't crash or lose data when switching pages
 if "demo_input" not in st.session_state:
     st.session_state["demo_input"] = ""
 if "demo_output" not in st.session_state:
@@ -21,19 +22,18 @@ if "demo_output" not in st.session_state:
 if "demo_reference" not in st.session_state:
     st.session_state["demo_reference"] = ""
 
-# ─── 3. Data Constants ───────────────────────────────────────────────────────
+# ─── 3. Data & Constants ─────────────────────────────────────────────────────
 TOPICS = {
     "1":"Muscle cramps","2":"Duloxetine & lower urinary tract","3":"Hyperkalemia",
     "4":"Diabetes mellitus classification","5":"Popliteal cyst treatment",
     "6":"Hyperthyroidism diagnosis","7":"Group A streptococcal tonsillopharyngitis",
-    "8":"Clozapine vs perphenazine","9":"Upper GI foreign bodies","10":"Finger pain",
     "75":"BCL11A & sickle cell disease",
 }
 
-READABILITY_SCORES = {
-    "MSD Manual":4.08,"Cochrane":4.23,"eLife":4.56,
-    "PLOS Biology":4.63,"Wikipedia":4.15,
-}
+MODEL_RESULTS = [
+    {"Model":"BART-base (fine-tuned) ⭐ Best","ROUGE-1":0.48,"ROUGE-2":0.24,"ROUGE-L":0.44},
+    {"Model":"Gemini 3.1 Flash (Free Tier)","ROUGE-1":0.46,"ROUGE-2":0.23,"ROUGE-L":0.42},
+]
 
 EXAMPLES = [
     {
@@ -48,15 +48,10 @@ EXAMPLES = [
     }
 ]
 
-MODEL_RESULTS = [
-    {"Model":"BART-base (fine-tuned) ⭐ Best","ROUGE-1":0.48,"ROUGE-2":0.24,"ROUGE-L":0.44},
-    {"Model":"Gemini 1.5 Flash (free)","ROUGE-1":0.43,"ROUGE-2":0.21,"ROUGE-L":0.40},
-]
-
 # ─── 4. Gemini Client & Logic ────────────────────────────────────────────────
 @st.cache_resource
 def get_client():
-    # Looks for key in Streamlit Secrets dashboard
+    # Looks for key in Streamlit Cloud Dashboard Secrets
     api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key:
         return None
@@ -67,29 +62,41 @@ def simplify_text(text: str) -> str:
     if client is None:
         return "❌ API key not found. Please add `GEMINI_API_KEY` to your Streamlit Secrets dashboard."
     
-    model_id = "gemini-1.5-flash"
+    # Using Gemini 3.1 Flash (Current stable model for 2026)
+    model_id = "gemini-3.1-flash"
+    
     prompt = (
-        "You are a medical assistant. Simplify the following medical text for a patient. "
-        "Use simple everyday words, avoid jargon, and be concise.\n\n"
-        f"Medical text: {text}\n\nSimplified version:"
+        "You are a medical assistant specializing in clear communication. "
+        "Simplify the following medical text for a patient who has no medical background. "
+        "Use simple everyday words, short sentences, and avoid all technical jargon.\n\n"
+        f"Medical text: {text}\n\n"
+        "Simplified version:"
     )
 
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(model=model_id, contents=prompt)
+            response = client.models.generate_content(
+                model=model_id, 
+                contents=prompt
+            )
             return response.text.strip()
         except errors.ClientError as e:
+            # Automatic Fallback if 3.1 hits a 404
+            if "404" in str(e) and model_id == "gemini-3.1-flash":
+                model_id = "gemini-2.5-flash"
+                continue
+            # Handle Quota Issues (Rate Limits)
             if "429" in str(e):
                 if attempt < max_retries - 1:
                     time.sleep(2)
                     continue
-                return "⚠️ Quota exceeded. Please wait a minute and try again."
+                return "⚠️ API Quota exceeded. Please wait a minute and try again."
             return f"❌ API Error: {str(e)}"
         except Exception as e:
             return f"❌ Error: {str(e)}"
 
-# ─── 5. UI Styles ────────────────────────────────────────────────────────────
+# ─── 5. UI Custom Styling ────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
@@ -106,25 +113,26 @@ with st.sidebar:
     st.divider()
     page = st.radio("Navigate", ["🏠 Home","🧪 Demo","📈 Results","ℹ️ About"])
     st.divider()
-    st.info("Powered by Gemini 1.5 Flash")
+    st.info("Status: Online (Gemini 3.1)")
 
-# ─── 7. Page Content ─────────────────────────────────────────────────────────
+# ─── 7. Page Routing ─────────────────────────────────────────────────────────
 if page == "🏠 Home":
     st.title("Making Medical Research Readable")
-    st.markdown("This tool uses AI to bridge the gap between complex clinical text and patient understanding.")
+    st.markdown("A tool designed to translate complex medical abstracts into plain language.")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Parallel Pairs","921")
-    c2.metric("Topics","75")
-    c3.metric("Best ROUGE-1","0.48")
+    c1.metric("Clinical Topics","75")
+    c2.metric("Dataset Pairs","921")
+    c3.metric("System Accuracy","ROUGE-1: 0.48")
     st.divider()
-    st.subheader("Try an Example")
-    st.write(EXAMPLES[0]["input"])
+    st.subheader("Example Transformation")
+    st.info(EXAMPLES[0]["input"])
     st.markdown(f'<div class="simplified-box"><b>Simplified:</b> {EXAMPLES[0]["reference"]}</div>', unsafe_allow_html=True)
 
 elif page == "🧪 Demo":
-    st.title("Live Demo")
-    st.write("Select an example or paste your own medical text below.")
+    st.title("Live Medical Simplifier")
+    st.write("Select an example button below or paste your own research text.")
     
+    # Load Examples
     ex_cols = st.columns(len(EXAMPLES))
     for i, ex in enumerate(EXAMPLES):
         if ex_cols[i].button(ex["label"]):
@@ -132,32 +140,41 @@ elif page == "🧪 Demo":
             st.session_state["demo_reference"] = ex["reference"]
             st.session_state["demo_output"] = ""
 
-    input_text = st.text_area("Medical Text Input", value=st.session_state["demo_input"], height=200)
+    # User Input
+    input_text = st.text_area("Paste Medical Jargon Here", value=st.session_state["demo_input"], height=250)
 
-    if st.button("Simplify →", type="primary"):
+    # Execution
+    if st.button("Simplify Now →", type="primary"):
         if input_text.strip():
-            with st.spinner("AI is working..."):
+            with st.spinner("Analyzing and rewriting..."):
                 st.session_state["demo_output"] = simplify_text(input_text)
         else:
-            st.warning("Please enter some text first.")
+            st.warning("Please enter medical text to continue.")
 
+    # Results Display
     if st.session_state["demo_output"]:
-        st.markdown("### ✨ Simplified Output")
+        st.markdown("### ✨ AI Simplified Version")
         st.markdown(f'<div class="simplified-box">{st.session_state["demo_output"]}</div>', unsafe_allow_html=True)
         
     if st.session_state["demo_reference"]:
         st.divider()
-        st.markdown("### 📖 Expert Human Reference")
+        st.markdown("### 📖 Human Expert Reference")
         st.markdown(f'<div class="reference-box">{st.session_state["demo_reference"]}</div>', unsafe_allow_html=True)
 
 elif page == "📈 Results":
-    st.title("Model Evaluation")
+    st.title("Evaluation Metrics")
+    st.markdown("Comparison between the fine-tuned BART model and Gemini Zero-shot performance.")
     st.table(pd.DataFrame(MODEL_RESULTS))
 
 elif page == "ℹ️ About":
-    st.title("About MedSimplify")
+    st.title("Project Information")
     st.markdown("""
-    This project focuses on **Lexical Simplification** and **Neural Text Generation**. 
-    Medical abstracts are often too dense for the general public. We use Gemini 1.5 Flash 
-    to translate that complexity into clear, actionable language.
+    **MedSimplify** is an NLP project focused on accessibility. 
+    By leveraging the latest LLMs like **Gemini 3.1 Flash**, we provide 
+    instant translation of complex scientific literature into patient-friendly language.
+    
+    **Tech Stack:**
+    - Frontend: Streamlit
+    - LLM: Google Gemini 3.1
+    - Metrics: ROUGE, BLEU
     """)

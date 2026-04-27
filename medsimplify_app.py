@@ -28,28 +28,30 @@ def get_ai_client():
     if not api_key: return None
     # Using v1beta version for better compatibility with free tier keys
     return genai.Client(api_key=api_key.strip(), http_options={'api_version': 'v1beta'})
-
 def simplify_text(text):
     client = get_ai_client()
     if not client:
         return "❌ API Key Missing: Please add GEMINI_API_KEY to Streamlit Secrets."
     
     try:
-        # Changed model to 'gemini-1.5-flash' for v1beta compatibility
+        # Update: Added 'models/' prefix which is often required by the new SDK
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="models/gemini-1.5-flash", 
             contents=f"Simplify this medical text for a patient. Use simple words: {text}"
         )
         return response.text
     except Exception as e:
-        # Helpful debugging for your project logs
-        if "404" in str(e):
-            return "❌ Model Error: The selected AI model was not found. Please use 'gemini-1.5-flash'."
-        elif "403" in str(e):
-            return "❌ Permission Error: Check your API Key in Google AI Studio."
-        else:
-            return f"❌ AI Error: {str(e)}"
-
+        # If models/gemini-1.5-flash fails, try the short name as a backup
+        try:
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=f"Simplify this medical text for a patient. Use simple words: {text}"
+            )
+            return response.text
+        except Exception as second_error:
+            if "404" in str(second_error):
+                return "❌ Model Error: Please ensure your API Key has access to Gemini 1.5 Flash in AI Studio."
+            return f"❌ AI Error: {str(second_error)}"
 # ─── 4. STYLING ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>

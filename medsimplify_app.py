@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import spacy
 import json
-import google.generativeai as genaiimport streamlit as st
+import google.generativeai as genai
+import streamlit as st
 import pandas as pd
 import spacy
 import json

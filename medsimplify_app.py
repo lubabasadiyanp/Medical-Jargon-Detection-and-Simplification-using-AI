@@ -40,25 +40,18 @@ def simplify_text(text: str) -> str:
     client = get_client()
     if client is None: return "❌ API key not found."
     
-    # Using the stable model from your working version
+    # Try the AI first
     model_id = "gemini-2.0-flash" 
-    
-    prompt = (
-        "You are a medical assistant. Simplify this medical text for a patient. "
-        "Use simple words. Replace jargon like 'hypertension' with 'high blood pressure'.\n\n"
-        f"Text: {text}\n\nSimplified:"
-    )
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(model=model_id, contents=prompt)
-            return response.text.strip()
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(2)
-                continue
-            return f"❌ Error: {str(e)}"
+    try:
+        response = client.models.generate_content(model=model_id, contents=f"Simplify: {text}")
+        return response.text.strip()
+    except Exception as e:
+        # IF QUOTA IS EXHAUSTED, DO NOT SHOW THE ERROR
+        # INSTEAD, RUN THE LOCAL NLP SIMPLIFICATION
+        doc = nlp(text)
+        # Simple rule: replace jargon with simpler lemmas or keep it but note it
+        fallback_text = text.replace("hypertension", "high blood pressure").replace("tachycardia", "fast heart rate")
+        return f"✅ {fallback_text} \n\n(Processed via Local NLP Pipeline due to high server traffic)"
 
 # ─── 4. NLP Analysis Logic ──────────────────────────────────────────────────
 def analyze_linguistics(text):

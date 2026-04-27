@@ -4,7 +4,8 @@ import pandas as pd
 import json
 import spacy
 import re
-from nltk.stem import WordNetLemmatizer
+from nltk.stem 
+import WordNetLemmatizer
 import nltk
 
 

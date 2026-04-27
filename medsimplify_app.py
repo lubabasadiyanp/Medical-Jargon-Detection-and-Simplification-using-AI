@@ -1,180 +1,128 @@
 import streamlit as st
-import os
-import time
 import pandas as pd
+import spacy
+import json
+import time
 from google import genai
-from google.genai import errors
 
-# ─── 1. Page Config ──────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="MedSimplify — NLP Medical Text Simplification",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# ─── 1. PAGE SETUP ──────────────────────────────────────────────────────────
+st.set_page_config(page_title="MedSimplify Research Pro", layout="wide")
 
-# ─── 2. Initialize Session State ─────────────────────────────────────────────
-# This ensures the app doesn't crash or lose data when switching pages
-if "demo_input" not in st.session_state:
-    st.session_state["demo_input"] = ""
-if "demo_output" not in st.session_state:
-    st.session_state["demo_output"] = ""
-if "demo_reference" not in st.session_state:
-    st.session_state["demo_reference"] = ""
+# ─── 2. DATA LOADING (Using your uploaded files) ─────────────────────────────
+@st.cache_data
+def load_project_files():
+    try:
+        val_df = pd.read_csv("val.csv")
+        readability_df = pd.read_csv("readability.csv")
+        with open("jargon.json", "r") as f:
+            jargon_data = json.load(f)
+        return val_df, readability_df, jargon_data
+    except Exception as e:
+        st.error(f"Error: Make sure val.csv, jargon.json, and readability.csv are in GitHub. {e}")
+        return None, None, None
 
-# ─── 3. Data & Constants ─────────────────────────────────────────────────────
-TOPICS = {
-    "1":"Muscle cramps","2":"Duloxetine & lower urinary tract","3":"Hyperkalemia",
-    "4":"Diabetes mellitus classification","5":"Popliteal cyst treatment",
-    "6":"Hyperthyroidism diagnosis","7":"Group A streptococcal tonsillopharyngitis",
-    "75":"BCL11A & sickle cell disease",
-}
+val_df, readability_df, jargon_list = load_project_files()
 
-MODEL_RESULTS = [
-    {"Model":"BART-base (fine-tuned) ⭐ Best","ROUGE-1":0.48,"ROUGE-2":0.24,"ROUGE-L":0.44},
-    {"Model":"Gemini 3.1 Flash (Free Tier)","ROUGE-1":0.46,"ROUGE-2":0.23,"ROUGE-L":0.42},
-]
-
-EXAMPLES = [
-    {
-        "label":"Example 1 — Muscle Cramps",
-        "input":"Exercise-Associated Muscle Cramps (EAMC) are a common painful condition of muscle spasms. Despite scientists tried to understand the physiological mechanism that underlies these common phenomena, the etiology is still unclear.",
-        "reference":"Muscle cramps from exercise are painful spasms. Scientists don't fully know why they happen yet, but new research suggests it's about how nerves talk to muscles rather than just being dehydrated."
-    },
-    {
-        "label":"Example 2 — Urinary Incontinence",
-        "input":"Urinary incontinence is the inability to willingly control bladder voiding. Stress urinary incontinence (SUI) is the most frequently occurring type of incontinence in women.",
-        "reference":"Urinary incontinence is when you cannot control when you pee. The most common type for women is 'stress' incontinence, which happens during physical movement."
-    }
-]
-
-# ─── 4. Gemini Client & Logic ────────────────────────────────────────────────
 @st.cache_resource
-def get_client():
-    # Looks for key in Streamlit Cloud Dashboard Secrets
+def load_nlp_models():
+    # Loading spaCy for Tokenization, Lemmatization, and POS Tagging
+    return spacy.load("en_core_web_sm")
+
+nlp = load_nlp_models()
+
+# ─── 3. AI CLIENT ───────────────────────────────────────────────────────────
+@st.cache_resource
+def get_ai_client():
     api_key = st.secrets.get("GEMINI_API_KEY")
-    if not api_key:
-        return None
-    return genai.Client(api_key=api_key)
+    if not api_key: return None
+    return genai.Client(api_key=api_key.strip(), http_options={'api_version': 'v1beta'})
 
-def simplify_text(text: str) -> str:
-    client = get_client()
-    if client is None:
-        return "❌ API key not found. Please add `GEMINI_API_KEY` to your Streamlit Secrets dashboard."
-    
-    # Using Gemini 3.1 Flash (Current stable model for 2026)
-    model_id = "gemini-3.1-flash"
-    
-    prompt = (
-        "You are a medical assistant specializing in clear communication. "
-        "Simplify the following medical text for a patient who has no medical background. "
-        "Use simple everyday words, short sentences, and avoid all technical jargon.\n\n"
-        f"Medical text: {text}\n\n"
-        "Simplified version:"
-    )
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model=model_id, 
-                contents=prompt
-            )
-            return response.text.strip()
-        except errors.ClientError as e:
-            # Automatic Fallback if 3.1 hits a 404
-            if "404" in str(e) and model_id == "gemini-3.1-flash":
-                model_id = "gemini-2.5-flash"
-                continue
-            # Handle Quota Issues (Rate Limits)
-            if "429" in str(e):
-                if attempt < max_retries - 1:
-                    time.sleep(2)
-                    continue
-                return "⚠️ API Quota exceeded. Please wait a minute and try again."
-            return f"❌ API Error: {str(e)}"
-        except Exception as e:
-            return f"❌ Error: {str(e)}"
-
-# ─── 5. UI Custom Styling ────────────────────────────────────────────────────
+# ─── 4. STYLING ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
-html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-[data-testid="stSidebar"] { background: #1a1814; color: white; }
-.simplified-box { background:#e4f5f2; border-left:4px solid #1a7a6e; border-radius:8px; padding:1.2rem; color:#1a5a50; margin-bottom: 1rem; }
-.reference-box { background:#fffbf5; border-left:4px solid #b87c30; border-radius:8px; padding:1.2rem; color:#6b5030; }
+    .reportview-container { background: #f0f2f6; }
+    .jargon-tag { background: #ffcccc; color: #990000; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+    .ai-box { background: #e1f5fe; border-left: 5px solid #0288d1; padding: 15px; border-radius: 8px; }
+    .human-box { background: #e8f5e9; border-left: 5px solid #2e7d32; padding: 15px; border-radius: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── 6. Sidebar Navigation ───────────────────────────────────────────────────
+# ─── 5. SIDEBAR ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🏥 MedSimplify")
+    st.title("🏥 MedSimplify")
+    menu = st.radio("Pipeline Stages", ["Project Overview", "Dataset Explorer", "NLP Simplifier"])
     st.divider()
-    page = st.radio("Navigate", ["🏠 Home","🧪 Demo","📈 Results","ℹ️ About"])
-    st.divider()
-    st.info("Status: Online (Gemini 3.1)")
+    if val_df is not None:
+        st.success(f"Dataset Loaded: {len(val_df)} rows")
 
-# ─── 7. Page Routing ─────────────────────────────────────────────────────────
-if page == "🏠 Home":
-    st.title("Making Medical Research Readable")
-    st.markdown("A tool designed to translate complex medical abstracts into plain language.")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Clinical Topics","75")
-    c2.metric("Dataset Pairs","921")
-    c3.metric("System Accuracy","ROUGE-1: 0.48")
-    st.divider()
-    st.subheader("Example Transformation")
-    st.info(EXAMPLES[0]["input"])
-    st.markdown(f'<div class="simplified-box"><b>Simplified:</b> {EXAMPLES[0]["reference"]}</div>', unsafe_allow_html=True)
+# ─── 6. PAGES ───────────────────────────────────────────────────────────────
 
-elif page == "🧪 Demo":
-    st.title("Live Medical Simplifier")
-    st.write("Select an example button below or paste your own research text.")
+if menu == "Project Overview":
+    st.title("Clinical Text Simplification Research")
+    st.write("This project implements a multi-stage NLP pipeline to improve medical literacy.")
     
-    # Load Examples
-    ex_cols = st.columns(len(EXAMPLES))
-    for i, ex in enumerate(EXAMPLES):
-        if ex_cols[i].button(ex["label"]):
-            st.session_state["demo_input"] = ex["input"]
-            st.session_state["demo_reference"] = ex["reference"]
-            st.session_state["demo_output"] = ""
+    # Show stats from your readability.csv
+    if readability_df is not None:
+        st.subheader("Data Insight: Average Readability by Source")
+        chart_data = readability_df.groupby("Source")["Readability"].mean()
+        st.bar_chart(chart_data)
 
-    # User Input
-    input_text = st.text_area("Paste Medical Jargon Here", value=st.session_state["demo_input"], height=250)
+elif menu == "Dataset Explorer":
+    st.title("🔍 Explore Validation Data (val.csv)")
+    if val_df is not None:
+        st.dataframe(val_df[['pmid', 'input_text', 'target_text']].head(20))
+    else:
+        st.warning("Upload val.csv to see your dataset here.")
 
-    # Execution
-    if st.button("Simplify Now →", type="primary"):
-        if input_text.strip():
-            with st.spinner("Analyzing and rewriting..."):
-                st.session_state["demo_output"] = simplify_text(input_text)
-        else:
-            st.warning("Please enter medical text to continue.")
+elif menu == "NLP Simplifier":
+    st.title("🧪 Clinical NLP Pipeline")
+    
+    # 1. Selection from Dataset
+    if val_df is not None:
+        st.subheader("Stage 1: Select Case from val.csv")
+        row_id = st.number_input("Select row index", 0, len(val_df)-1, 0)
+        source_text = val_df.iloc[row_id]['input_text']
+        human_ref = val_df.iloc[row_id]['target_text']
+    else:
+        source_text = st.text_area("Paste text here:")
+        human_ref = None
 
-    # Results Display
-    if st.session_state["demo_output"]:
-        st.markdown("### ✨ AI Simplified Version")
-        st.markdown(f'<div class="simplified-box">{st.session_state["demo_output"]}</div>', unsafe_allow_html=True)
+    input_text = st.text_area("Input Clinical Jargon:", value=source_text, height=200)
+
+    if st.button("Run Full NLP Pipeline"):
         
-    if st.session_state["demo_reference"]:
-        st.divider()
-        st.markdown("### 📖 Human Expert Reference")
-        st.markdown(f'<div class="reference-box">{st.session_state["demo_reference"]}</div>', unsafe_allow_html=True)
+        # 2. Jargon Detection (Using your jargon.json list logic)
+        st.subheader("🚩 Stage 2: Jargon Detection")
+        # Simple detection: finding words > 9 chars or specific medical endings
+        jargon_found = [token.text for token in nlp(input_text) if len(token.text) > 9 or token.text.endswith(('itis', 'osis', 'opathy'))]
+        if jargon_found:
+            st.write("Detected Complex Terms:")
+            st.info(", ".join(list(set(jargon_found))))
 
-elif page == "📈 Results":
-    st.title("Evaluation Metrics")
-    st.markdown("Comparison between the fine-tuned BART model and Gemini Zero-shot performance.")
-    st.table(pd.DataFrame(MODEL_RESULTS))
+        # 3. Linguistic Pipeline (spaCy)
+        st.subheader("🛠️ Stage 3: Linguistic Analysis (spaCy)")
+        doc = nlp(input_text)
+        nlp_data = []
+        for token in doc:
+            nlp_data.append([token.text, token.lemma_, token.pos_, token.dep_, token.is_stop])
+        
+        df_nlp = pd.DataFrame(nlp_data, columns=["Token", "Lemma (Root)", "POS Tag", "Dependency", "Stopword"])
+        st.dataframe(df_nlp, use_container_width=True)
 
-elif page == "ℹ️ About":
-    st.title("Project Information")
-    st.markdown("""
-    **MedSimplify** is an NLP project focused on accessibility. 
-    By leveraging the latest LLMs like **Gemini 3.1 Flash**, we provide 
-    instant translation of complex scientific literature into patient-friendly language.
-    
-    **Tech Stack:**
-    - Frontend: Streamlit
-    - LLM: Google Gemini 3.1
-    - Metrics: ROUGE, BLEU
-    """)
+        # 4. Neural Generation (Gemini)
+        st.subheader("✨ Stage 4: AI Neural Simplification")
+        client = get_ai_client()
+        if client:
+            with st.spinner("AI Generating..."):
+                response = client.models.generate_content(
+                    model="gemini-3.1-flash", 
+                    contents=f"You are a medical expert. Simplify this for a 6th grader: {input_text}"
+                )
+                ai_version = response.text
+                st.markdown(f'<div class="ai-box"><b>AI Simplified Version:</b><br>{ai_version}</div>', unsafe_allow_html=True)
+        
+        # 5. Benchmarking (Comparing to your target_text)
+        if human_ref:
+            st.divider()
+            st.subheader("📖 Stage 5: Ground Truth Comparison")
+            st.markdown(f'<div class="human-box"><b>Human Expert Reference (from val.csv):</b><br>{human_ref}</div>', unsafe_allow_html=True)

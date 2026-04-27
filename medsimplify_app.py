@@ -19,25 +19,32 @@ def simplify_text_stable(text):
     api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key:
         return "❌ API Key Missing: Add GEMINI_API_KEY to Streamlit Secrets."
-    
-    try:
-        genai.configure(api_key=api_key.strip())
-        
-        # We use Gemini 2.0 Flash - the current most stable and modern version
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        
-        response = model.generate_content(
-            f"Simplify this medical text for a patient. Use simple words: {text}"
-        )
-        return response.text
-    except Exception as e:
-        # If 2.0 fails (rare), we try the experimental backup
+
+    genai.configure(api_key=api_key.strip())
+
+    models_to_try = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+    ]
+
+    prompt = (
+        "You are a medical assistant. Simplify the following medical text so a "
+        "non-medical patient can easily understand it. Use simple words, avoid "
+        "jargon, and keep the meaning the same.\n\n"
+        f"Medical text: {text}\n\nSimplified version:"
+    )
+
+    for model_name in models_to_try:
         try:
-            model_backup = genai.GenerativeModel('gemini-2.0-flash-lite-preview-02-05')
-            response = model_backup.generate_content(text)
-            return response.text
-        except:
-            return f"❌ AI Pipeline Error: The model name changed or is unavailable. Error: {str(e)}"
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as e:
+            if "429" in str(e) or "quota" in str(e).lower():
+                continue
+            return f"❌ Error: {str(e)}"
+
+    return "❌ Rate limit reached. Please wait a few minutes and try again."
 
 # ─── 4. MAIN INTERFACE ──────────────────────────────────────────────────────
 st.title("🏥 MedSimplify")

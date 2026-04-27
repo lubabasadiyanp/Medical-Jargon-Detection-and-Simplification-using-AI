@@ -29,24 +29,24 @@ def get_ai_client():
     # Using v1beta version for better compatibility with free tier keys
     return genai.Client(api_key=api_key.strip(), http_options={'api_version': 'v1beta'})
 
-# ─── 3. THE SIMPLIFICATION FUNCTION ──────────────────────────────────────────
 def simplify_text(text):
     client = get_ai_client()
     if not client:
         return "❌ API Key Missing: Please add GEMINI_API_KEY to Streamlit Secrets."
     
     try:
+        # Changed model to 'gemini-1.5-flash' for v1beta compatibility
         response = client.models.generate_content(
-            model="gemini-3.1-flash",
+            model="gemini-1.5-flash",
             contents=f"Simplify this medical text for a patient. Use simple words: {text}"
         )
         return response.text
     except Exception as e:
-        # This catches the ClientError and explains it simply
-        if "403" in str(e):
-            return "❌ API Error: Permission Denied. Your API key might be restricted or inactive."
-        elif "429" in str(e):
-            return "⚠️ Quota full: Please wait 60 seconds and try again."
+        # Helpful debugging for your project logs
+        if "404" in str(e):
+            return "❌ Model Error: The selected AI model was not found. Please use 'gemini-1.5-flash'."
+        elif "403" in str(e):
+            return "❌ Permission Error: Check your API Key in Google AI Studio."
         else:
             return f"❌ AI Error: {str(e)}"
 

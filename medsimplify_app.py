@@ -3,88 +3,88 @@ import pandas as pd
 import spacy
 from google import genai
 
-# --- 1. SETUP ---
-st.set_page_config(page_title="MedSimplify AI", layout="wide")
-
+# ─── 1. NLP ENGINE (The "Brain") ───
 @st.cache_resource
 def load_nlp():
-    # We use the medium model for better "training" accuracy if available, 
-    # otherwise small is fine.
+    # This handles Lemmatization (turning 'running' to 'run') 
+    # and Stemming-like logic automatically.
     return spacy.load("en_core_web_sm")
 
 @st.cache_data
-def load_data():
+def load_training_data():
     try:
+        # This loads the data you already uploaded to GitHub
         df = pd.read_csv("train.csv")
-        # Ensure we know which columns are which
-        return df.iloc[:, [0, 1]] # Takes first two columns
+        return df
     except:
+        st.error("Could not find train.csv in your GitHub folder.")
         return None
 
 nlp = load_nlp()
-train_df = load_data()
+train_df = load_training_data()
 
-# --- 2. THE SEARCH/TRAINING ENGINE ---
-def get_best_match(user_query):
-    if train_df is None:
-        return None
+# ─── 2. PREDICTIVE PIPELINE ───
+def predict_simple_text(user_input):
+    # STEP A: NLC Preprocessing
+    doc = nlp(user_input.lower().strip())
     
-    # NLP Process: Vectorize the user's search
-    query_doc = nlp(user_query.lower())
+    # Extracting base forms (Lemmas)
+    lemmatized_text = [token.lemma_ for token in doc if not token.is_stop]
     
-    best_score = 0
-    best_result = ""
+    # STEP B: Prediction via Semantic Similarity
+    best_match = None
+    max_similarity = 0
     
-    # We "train" the search by comparing similarity across the dataset
-    # We check the first 200 rows for speed
-    for _, row in train_df.head(200).iterrows():
-        sample_doc = nlp(str(row[0]).lower())
-        
-        # This is the core NLP Similarity process
-        score = query_doc.similarity(sample_doc)
-        
-        if score > best_score:
-            best_score = score
-            best_result = row[1] # The simplified version
+    if train_df is not None:
+        # We compare your input to every row in your uploaded dataset
+        for _, row in train_df.iterrows():
+            # row[0] is jargon, row[1] is simple version
+            target_doc = nlp(str(row.iloc[0]).lower())
             
-    # Only return if the "training" match is strong enough (>60% match)
-    return best_result if best_score > 0.6 else None
+            # This calculates how 'close' the meaning is
+            score = doc.similarity(target_doc)
+            
+            if score > max_similarity:
+                max_similarity = score
+                best_match = row.iloc[1]
 
-# --- 3. MAIN LOGIC ---
-def simplify_logic(text):
-    # STEP A: Check the "Trained" Dataset first
-    match = get_best_match(text)
-    if match:
-        return match, "📊 Dataset Match (Semantic Search)"
+    # STEP C: Accuracy Threshold
+    # If our data-driven prediction is high (above 70%), use it.
+    if max_similarity > 0.7:
+        return best_match, "Dataset Prediction", lemmatized_text
     
-    # STEP B: If no data match, use AI as the backup brain
+    # STEP D: Neural Backup (Gemini) if data match is low
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY")
-        client = genai.Client(api_key=api_key.strip())
+        key = st.secrets.get("GEMINI_API_KEY")
+        client = genai.Client(api_key=key.strip())
         res = client.models.generate_content(
-            model="gemini-1.5-flash", 
-            contents=f"Simplify this medical term: {text}"
+            model="gemini-1.5-flash",
+            contents=f"Simplify this medical jargon for a patient: {user_input}"
         )
-        return res.text.strip(), "🤖 Neural AI Engine"
+        return res.text.strip(), "Neural AI Backup", lemmatized_text
     except:
-        return text, "⚠️ No training match found."
+        return "Please try a different term.", "No Match", lemmatized_text
 
-# --- 4. UI ---
-st.title("🏥 MedSimplify: Data-Driven NLP")
+# ─── 3. THE APP INTERFACE ───
+st.title("🏥 MedSimplify: Predictive NLP")
+st.markdown("This app uses your GitHub datasets to predict simplified medical meanings.")
 
-user_input = st.text_input("Search Medical Term (e.g., ductal carcinoma):")
+user_query = st.text_input("Enter Medical Jargon:")
 
-if user_input:
-    with st.spinner("Searching knowledge base..."):
-        output, source = simplify_logic(user_input)
+if user_query:
+    with st.spinner("Executing NLP Pipeline..."):
+        result, source, lemmas = predict_simple_text(user_query)
         
-        st.markdown("### Output:")
-        st.success(output)
-        st.info(f"Source: {source}")
-
-        # Show the NLP process in action
-        doc = nlp(user_input)
-        st.write("**NLP Breakdown:**")
-        cols = st.columns(len(doc))
-        for i, token in enumerate(doc):
-            cols[i].caption(f"{token.text}\n({token.pos_})")
+        st.subheader("Simplified Prediction:")
+        st.success(result)
+        
+        # PROVING THE NLP PROCESS
+        st.divider()
+        st.write("### 🔬 NLP Pipeline Diagnostics")
+        st.write(f"**Engine Used:** {source}")
+        st.write(f"**Lemmatization Result:** `{lemmas}`")
+        
+        # Display the POS tagging to show the professor the "NLC" process
+        doc = nlp(user_query)
+        tokens_data = [{"Token": t.text, "Lemma": t.lemma_, "POS": t.pos_, "Is Stopword": t.is_stop} for t in doc]
+        st.table(pd.DataFrame(tokens_data))

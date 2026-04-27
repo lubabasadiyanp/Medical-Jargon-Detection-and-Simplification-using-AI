@@ -2,7 +2,109 @@ import streamlit as st
 import pandas as pd
 import spacy
 import json
+import google.generativeai as genaiimport streamlit as st
+import pandas as pd
+import spacy
+import json
 import google.generativeai as genai
+
+# ─── 1. PAGE SETUP ──────────────────────────────────────────────────────────
+st.set_page_config(page_title="MedSimplify Pro", page_icon="🏥")
+
+# ─── 2. LOAD RESOURCES ──────────────────────────────────────────────────────
+@st.cache_resource
+def load_nlp():
+    # Local processing: Tokenization, POS, Lemmatization
+    return spacy.load("en_core_web_sm")
+
+@st.cache_data
+def load_data():
+    try:
+        with open("jargon.json", "r") as f:
+            return json.load(f)
+    except:
+        return []
+
+nlp = load_nlp()
+jargon_lookup = load_data()
+
+# ─── 3. STABLE AI LOGIC ─────────────────────────────────────────────────────
+def simplify_text_stable(text):
+    api_key = st.secrets.get("GEMINI_API_KEY")
+    if not api_key:
+        return "❌ API Key Missing: Add GEMINI_API_KEY to Streamlit Secrets."
+    
+    try:
+        # Configuration without forced 'v1beta'
+        genai.configure(api_key=api_key.strip())
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        response = model.generate_content(
+            f"Simplify this medical text for a patient. Use simple words: {text}"
+        )
+        return response.text
+    except Exception as e:
+        return f"❌ AI Pipeline Error: {str(e)}"
+
+# ─── 4. UI STYLING ──────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .stTextArea textarea { font-size: 1.1rem !important; }
+    .simplified-box { background-color: #f0fdfa; padding: 20px; border-radius: 10px; border-left: 5px solid #0d9488; color: #134e4a; }
+    .nlp-header { color: #64748b; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; margin-bottom: 10px; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── 5. MAIN INTERFACE ──────────────────────────────────────────────────────
+st.title("🏥 MedSimplify")
+st.subheader("NLP-Driven Clinical Text Simplification")
+
+input_text = st.text_area("Paste medical text here:", height=200, 
+                          placeholder="e.g., Acute myocardial infarction involving the left anterior descending artery...")
+
+if st.button("Run NLP Pipeline", type="primary"):
+    if input_text.strip():
+        # --- STAGE 1: LOCAL PROCESSING (spaCy) ---
+        doc = nlp(input_text)
+        
+        # --- STAGE 2: NEURAL PROCESSING (Gemini) ---
+        with st.spinner("Processing through Neural Pipeline..."):
+            ai_output = simplify_text_stable(input_text)
+            
+        st.markdown("---")
+        st.markdown('<p class="nlp-header">Stage 5: Neural Simplification Output</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="simplified-box">{ai_output}</div>', unsafe_allow_html=True)
+        
+        st.divider()
+
+        # --- STAGE 3: TECHNICAL PROJECT PROOF ---
+        with st.expander("🔬 View Pipeline Data (Tokenization, POS, Lemmatization)"):
+            st.write("Linguistic analysis results from `en_core_web_sm` model:")
+            
+            # DataFrame for evaluation
+            nlp_data = []
+            for token in doc:
+                nlp_data.append({
+                    "Token": token.text,
+                    "Lemma": token.lemma_,
+                    "POS Tag": token.pos_,
+                    "Explanation": spacy.explain(token.pos_)
+                })
+            
+            st.dataframe(pd.DataFrame(nlp_data), use_container_width=True)
+
+            # Jargon Extraction Logic
+            jargon_found = [t.text for t in doc if len(t.text) > 8 and t.pos_ in ["NOUN", "ADJ"]]
+            st.markdown('<p class="nlp-header">Stage 4: Entity & Jargon Identification</p>', unsafe_allow_html=True)
+            if jargon_found:
+                st.info(", ".join(list(set(jargon_found))))
+            else:
+                st.write("No complex jargon detected.")
+    else:
+        st.warning("Please enter text first.")
+
+st.markdown("---")
+st.caption("NLP Research Project | Pipeline: spaCy + Gemini 1.5 | Ground Truth: val.csv, jargon.json")
 
 # ─── 1. PAGE CONFIGURATION ──────────────────────────────────────────────────
 st.set_page_config(page_title="MedSimplify Pro", page_icon="🏥", layout="centered")

@@ -32,26 +32,34 @@ client = get_client()
 train_df = load_corpus()
 
 # ─── 3. HYBRID SIMPLIFICATION LOGIC ───
+# ─── 3. HYBRID SIMPLIFICATION LOGIC (FIXED) ───
 def simplify_logic(text):
     # STEP 1: Try Gemini AI
     if client:
         try:
-            # Using 2.0 Flash (Stable for 2026)
             res = client.models.generate_content(
                 model="gemini-2.0-flash", 
                 contents=f"Simplify this medical text for a patient: {text}"
             )
             return res.text.strip(), "🤖 Neural Engine (Gemini)"
         except Exception:
-            pass # AI Failed/Quota Exhausted, move to Dataset
+            pass 
 
-    # STEP 2: Dataset Lookup (Using your train.csv)
+    # STEP 2: Dataset Lookup (FIXED FOR ANY COLUMN NAMES)
     if train_df is not None:
-        # Look for a match in your data
-        # Note: Change 'source' and 'target' to match your CSV column names
-        matches = train_df[train_df['source'].str.contains(text[:15], case=False, na=False)]
-        if not matches.empty:
-            return matches.iloc[0]['target'], "📊 Dataset Retrieval (train.csv)"
+        try:
+            # Get the names of your columns automatically
+            cols = train_df.columns
+            # Use the first column as 'source' and second as 'target'
+            source_col = cols[0] 
+            target_col = cols[1]
+
+            # Search for a match
+            matches = train_df[train_df[source_col].str.contains(text[:10], case=False, na=False)]
+            if not matches.empty:
+                return matches.iloc[0][target_col], "📊 Dataset Retrieval (train.csv)"
+        except Exception as e:
+            print(f"Dataset search error: {e}")
 
     # STEP 3: Basic NLP Fallback
     doc = nlp(text)

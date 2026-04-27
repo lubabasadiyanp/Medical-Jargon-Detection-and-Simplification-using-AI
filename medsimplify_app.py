@@ -4,94 +4,108 @@ import spacy
 import json
 import google.generativeai as genai
 
-# ─── 1. PAGE SETUP ──────────────────────────────────────────────────────────
-st.set_page_config(page_title="MedSimplify Pro", page_icon="🏥")
+# ─── 1. PAGE CONFIGURATION ──────────────────────────────────────────────────
+st.set_page_config(page_title="MedSimplify Pro", page_icon="🏥", layout="centered")
 
-# ─── 2. LOAD NLP MODELS & DATA ──────────────────────────────────────────────
+# ─── 2. RESOURCE LOADING ─────────────────────────────────────────────────────
 @st.cache_resource
-def load_resources():
-    # Load spaCy for Linguistic Analysis (Tokens, POS, Lemmatization)
+def load_nlp_pipeline():
+    # Local NLP processing using spaCy
     try:
-        nlp = spacy.load("en_core_web_sm")
-    except Exception as e:
-        st.error(f"spaCy Model Load Error: {e}")
-        return None, None
-        
-    # Load jargon dictionary for entity mapping
+        return spacy.load("en_core_web_sm")
+    except:
+        return None
+
+@st.cache_data
+def load_jargon_data():
+    # Loading your project files
     try:
         with open("jargon.json", "r") as f:
-            jargon_data = json.load(f)
+            return json.load(f)
     except:
-        jargon_data = []
-    return nlp, jargon_data
+        return []
 
-nlp, jargon_lookup = load_resources()
+nlp = load_nlp_pipeline()
+jargon_list = load_jargon_data()
 
-# ─── 3. THE SIMPLIFICATION LOGIC ───────────────────────────────────────────
-def simplify_text(text):
+# ─── 3. AI LOGIC (STABLE VERSION) ───────────────────────────────────────────
+def get_ai_simplification(text):
     api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key:
-        return "❌ API Key Missing: Add GEMINI_API_KEY to Streamlit Secrets."
+        return "❌ Error: API Key not found in Streamlit Secrets."
     
     try:
-        # Configuring the stable genai library
         genai.configure(api_key=api_key.strip())
+        # Using the most stable model name to avoid 404 errors
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        response = model.generate_content(
-            f"You are a medical translator. Simplify this for a patient: {text}"
-        )
+        prompt = f"Translate this complex medical text into simple, everyday English for a patient: {text}"
+        response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"❌ AI Error: {str(e)}"
+        return f"❌ AI Pipeline Error: {str(e)}"
 
-# ─── 4. MAIN INTERFACE ──────────────────────────────────────────────────────
+# ─── 4. CUSTOM STYLING ──────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .reportview-container { background: #fdfdfd; }
+    .simplified-box { background-color: #e8f4f1; padding: 20px; border-radius: 10px; border-left: 5px solid #1a7a6e; color: #1a5a50; }
+    .nlp-label { color: #555; font-size: 0.8rem; font-weight: bold; text-transform: uppercase; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── 5. MAIN INTERFACE ──────────────────────────────────────────────────────
 st.title("🏥 MedSimplify")
 st.markdown("### Clinical Jargon Simplification Pipeline")
+st.write("An NLP Research Tool for Patient-Centered Communication.")
 
-input_text = st.text_area("Input Medical Text:", height=180, 
-                          placeholder="e.g., Patient diagnosed with acute idiopathic pulmonary fibrosis...")
+# User Input
+input_text = st.text_area("Paste Medical Text (Abstract or Clinical Note):", height=200, 
+                          placeholder="e.g., The patient was diagnosed with idiopathic pulmonary fibrosis...")
 
-if st.button("Process NLP Pipeline", type="primary"):
+if st.button("Run NLP Pipeline", type="primary"):
     if input_text.strip():
-        # --- STAGE 1: LOCAL LINGUISTIC PROCESSING ---
-        # We run spaCy first so we have data even if the AI fails
-        doc = nlp(input_text)
-        
-        # --- STAGE 2: AI NEURAL GENERATION ---
-        with st.spinner("Analyzing and Generating..."):
-            ai_output = simplify_text(input_text)
-            st.markdown("#### ✨ Simplified Patient Version")
-            st.success(ai_output)
+        # --- STAGE 1: LOCAL NLP ANALYSIS (The "Project" Backbone) ---
+        if nlp:
+            doc = nlp(input_text)
             
-        st.divider()
-
-        # --- STAGE 3: PROJECT PROOF (The NLP "Backbone") ---
-        with st.expander("🔬 View Technical NLP Analysis (Stages 1-4)"):
-            st.write("This section demonstrates the internal linguistic processing.")
+            # --- STAGE 2: AI GENERATION ---
+            with st.spinner("Processing through Neural Pipeline..."):
+                simplified_result = get_ai_simplification(input_text)
             
-            # 1. POS and Lemmatization Table
-            nlp_data = []
-            for token in doc:
-                nlp_data.append({
-                    "Token": token.text,
-                    "Lemma": token.lemma_,
-                    "POS Tag": token.pos_,
-                    "Description": spacy.explain(token.pos_)
-                })
+            st.markdown("---")
+            st.markdown('<p class="nlp-label">Stage 5: Neural Simplification Output</p>', unsafe_allow_html=True)
+            st.markdown(f'<div class="simplified-box">{simplified_result}</div>', unsafe_allow_html=True)
             
-            st.write("**Linguistic Analysis (Tokenization & Morphological Analysis):**")
-            st.dataframe(pd.DataFrame(nlp_data), use_container_width=True)
-
-            # 2. Heuristic Jargon Detection
-            jargon_terms = [t.text for t in doc if len(t.text) > 8 and t.pos_ in ["NOUN", "ADJ"]]
-            st.write("**Identified Clinical Jargon (Entity Extraction):**")
-            if jargon_terms:
-                st.warning(", ".join(list(set(jargon_terms))))
-            else:
-                st.write("No high-complexity jargon detected.")
+            st.markdown("---")
+            
+            # --- STAGE 3: TECHNICAL EVIDENCE (For Presentation) ---
+            with st.expander("🔬 View Pipeline Data (Tokenization, POS, Lemmatization)"):
+                st.write("This local analysis is performed using the `en_core_web_sm` model.")
+                
+                # Create DataFrame for Linguistic Analysis
+                analysis_data = []
+                for token in doc:
+                    analysis_data.append({
+                        "Token": token.text,
+                        "Lemma": token.lemma_,
+                        "POS Tag": token.pos_,
+                        "Morphology": spacy.explain(token.pos_)
+                    })
+                
+                df = pd.DataFrame(analysis_data)
+                st.dataframe(df, use_container_width=True)
+                
+                # Jargon Detection Stage
+                st.markdown('<p class="nlp-label">Stage 4: Entity & Jargon Identification</p>', unsafe_allow_html=True)
+                complex_terms = [t.text for t in doc if len(t.text) > 8 and t.pos_ in ["NOUN", "ADJ"]]
+                if complex_terms:
+                    st.info(f"Potential Jargon Detected: {', '.join(list(set(complex_terms)))}")
+        else:
+            st.error("Linguistic model failed to load. Check requirements.txt")
     else:
-        st.warning("Please enter text first.")
+        st.warning("Please enter medical text to analyze.")
 
+# ─── 6. FOOTER ──────────────────────────────────────────────────────────────
 st.markdown("---")
-st.caption("NLP Research Project | Pipeline: spaCy + Gemini 1.5 | Datasets: val.csv, jargon.json")
+st.caption("Developed for NLP Research Project | Powered by spaCy & Google Gemini 1.5")

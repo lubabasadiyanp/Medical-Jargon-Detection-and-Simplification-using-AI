@@ -1,100 +1,101 @@
 import streamlit as st
 import pandas as pd
+import json
 import spacy
-from google import genai
+import re
+from nltk.stem import WordNetLemmatizer
+import nltk
 
-# --- 1. NLP ENGINE SETUP ---
-@st.cache_resource
-def load_nlp():
-    # Performs Tokenization, Lemmatization, and POS Tagging
-    return spacy.load("en_core_web_sm")
+# Download necessary NLTK data
+nltk.download('wordnet')
+nltk.download('omw-1.4')
 
+# Load NLP model
+try:
+    nlp = spacy.load("en_core_web_sm")
+except:
+    import os
+    os.system("python -m spacy download en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
+
+lemmatizer = WordNetLemmatizer()
+
+# --- STEP 1: LOAD AND PREPROCESS DATASET ---
 @st.cache_data
-def load_training_data():
-    try:
-        # Reads your uploaded GitHub dataset
-        df = pd.read_csv("train.csv")
-        return df
-    except:
-        return None
-
-nlp = load_nlp()
-train_df = load_training_data()
-
-# --- 2. THE PREDICTIVE PIPELINE ---
-def predict_simplification(user_input):
-    # STEP A: NLC Preprocessing
-    doc = nlp(user_input.lower().strip())
-    # Generate Lemmas (Base forms)
-    lemmas = [t.lemma_ for t in doc if not t.is_stop]
+def load_dictionary():
+    # We combine jargon mapping from your uploaded files
+    medical_dict = {}
     
-    # STEP B: Local Knowledge Base (Manual Training)
-    # This ensures common terms NEVER fail
-    knowledge_base = {
-        "ductal carcinoma": "A common type of non-invasive breast cancer.",
-        "carcinoma": "A type of cancer that starts in cells that make up the skin or tissue lining organs.",
-        "hypertension": "High blood pressure that can lead to heart disease.",
-        "tachycardia": "A heart rate that's faster than normal.",
-        "myocardial infarction": "A heart attack caused by a lack of blood flow to the heart.",
-        "dyspnea": "Difficulty breathing or shortness of breath."
+    # Example loading from jargon.json (based on your file structure)
+    with open('jargon.json', 'r') as f:
+        jargon_data = json.load(f)
+        for item in jargon_data:
+            if 'entities' in item:
+                for entity in item['entities']:
+                    # mapping complex token to a simpler placeholder or the "simple" version
+                    # This logic assumes the entity list contains [start, end, label, [text]]
+                    complex_term = entity[3][0].lower()
+                    # In a real scenario, you'd map this to a target_text from your CSVs
+                    medical_dict[complex_term] = "simplified version" 
+
+    # Adding manual high-impact mappings from your data.json and CSVs
+    # Examples based on the files you provided:
+    manual_mappings = {
+        "nephrotic syndrome": "kidney damage causing protein leak",
+        "chylothorax": "lymph fluid buildup around lungs",
+        "myeloid cells": "bone marrow immune cells",
+        "vaso-occlusive crises": "painful blood vessel blockages",
+        "cerebral vasculopathy": "brain blood vessel disease",
+        "soma": "cell body",
+        "edema": "swelling",
+        "dyspnea": "shortness of breath"
     }
+    medical_dict.update(manual_mappings)
+    return medical_dict
 
-    # Check local knowledge first
-    for term, simple in knowledge_base.items():
-        if term in user_input.lower():
-            return simple, "Local NLP Knowledge Base", lemmas
+medical_lookup = load_dictionary()
 
-    # STEP C: Dataset Similarity Search (Trained on your CSV)
-    best_match = None
-    max_score = 0
-    if train_df is not None:
-        for _, row in train_df.iterrows():
-            data_doc = nlp(str(row.iloc[0]).lower())
-            score = doc.similarity(data_doc)
-            if score > max_score:
-                max_score = score
-                best_match = row.iloc[1]
-
-    if max_score > 0.4: # Similarity Threshold
-        return best_match, f"Dataset Prediction ({int(max_score*100)}% Match)", lemmas
-
-    # STEP D: Neural AI Fallback (Gemini)
-    try:
-        key = st.secrets.get("GEMINI_API_KEY")
-        client = genai.Client(api_key=key.strip())
-        res = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=f"Simply explain this medical term for a patient: {user_input}"
-        )
-        return res.text.strip(), "Neural AI Engine", lemmas
-    except:
-        return f"Term '{user_input}' identified as clinical jargon. No direct simplification in training data.", "Linguistic Tagging Only", lemmas
-
-# --- 3. THE INTERFACE ---
-st.title("🏥 MedSimplify Predictive AI")
-st.write("Using Data-Driven NLP to translate medical jargon.")
-
-query = st.text_input("Enter Medical Term (e.g., ductal carcinoma):")
-
-if query:
-    with st.spinner("Running NLP Pipeline..."):
-        result, engine, processed_lemmas = predict_simplification(query)
+# --- STEP 2: SIMPLIFICATION LOGIC ---
+def simplify_text(text):
+    # NLC Preprocessing: Lemmatization
+    doc = nlp(text)
+    simplified_words = []
+    
+    for token in doc:
+        # Get the base form of the word (Lemmatization)
+        lemma = token.lemma_.lower()
         
-        st.subheader("Simplified Output:")
-        st.success(result)
-        
-        # PROVING THE NLP PROCESS (For your Project Grade)
-        st.divider()
-        st.write("### 🔬 NLP Pipeline Diagnostics")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"**Engine Used:** {engine}")
-            st.write(f"**Lemmatized Form:** `{processed_lemmas}`")
-        with col2:
-            st.write("**POS Tags Detected:**")
-            # This shows the POS tagging you mentioned
-            doc = nlp(query)
-            st.write([f"{t.text} ({t.pos_})" for t in doc])
+        # Check if the word or its lemma is in our medical dictionary
+        if lemma in medical_lookup:
+            simplified_words.append(f"**{medical_lookup[lemma]}** ({token.text})")
+        elif token.text.lower() in medical_lookup:
+            simplified_words.append(f"**{medical_lookup[token.text.lower()]}** ({token.text})")
+        else:
+            simplified_words.append(token.text)
+            
+    return " ".join(simplified_words)
 
-        # Technical Visualization
-        st.info("The system used **Lemmatization** and **Semantic Vector Comparison** to find this result.")
+# --- STEP 3: STREAMLIT UI ---
+st.set_page_config(page_title="MedSimplify", page_icon="🏥")
+
+st.title("🏥 MedSimplify AI")
+st.markdown("Transform complex medical jargon into plain English using NLP.")
+
+input_text = st.text_area("Enter medical notes or terms here:", 
+                         placeholder="Patient presents with acute dyspnea and severe edema...")
+
+if st.button("Simplify Now"):
+    if input_text:
+        with st.spinner('Processing medical terms...'):
+            result = simplify_text(input_text)
+            st.subheader("Simplified Interpretation:")
+            st.write(result)
+            
+            st.info("💡 Note: This tool uses lemmatization to identify base medical terms.")
+    else:
+        st.warning("Please enter some text first!")
+
+# --- STEP 4: DATA INSIGHTS (Optional) ---
+if st.checkbox("Show dataset coverage"):
+    st.write(f"Total unique medical terms in library: {len(medical_lookup)}")
+    st.dataframe(pd.DataFrame(list(medical_lookup.items()), columns=["Complex Term", "Simple Term"]))

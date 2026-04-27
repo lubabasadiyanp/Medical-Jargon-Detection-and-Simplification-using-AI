@@ -3,6 +3,7 @@ import pandas as pd
 import spacy
 import json
 from google import genai
+from google.genai import errors
 
 # ─── 1. PAGE SETUP ──────────────────────────────────────────────────────────
 st.set_page_config(page_title="MedSimplify — Professional NLP", page_icon="🏥")
@@ -10,8 +11,8 @@ st.set_page_config(page_title="MedSimplify — Professional NLP", page_icon="�
 # ─── 2. LOAD NLP MODELS & DATA ──────────────────────────────────────────────
 @st.cache_resource
 def load_resources():
+    # This handles the Tokenization, POS Tagging, and Lemmatization
     nlp = spacy.load("en_core_web_sm")
-    # Load jargon dictionary to help the app identify difficult words
     try:
         with open("jargon.json", "r") as f:
             jargon_data = json.load(f)
@@ -25,71 +26,84 @@ nlp, jargon_lookup = load_resources()
 def get_ai_client():
     api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key: return None
+    # Using v1beta version for better compatibility with free tier keys
     return genai.Client(api_key=api_key.strip(), http_options={'api_version': 'v1beta'})
 
-# ─── 3. STYLING ──────────────────────────────────────────────────────────────
+# ─── 3. THE SIMPLIFICATION FUNCTION ──────────────────────────────────────────
+def simplify_text(text):
+    client = get_ai_client()
+    if not client:
+        return "❌ API Key Missing: Please add GEMINI_API_KEY to Streamlit Secrets."
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-3.1-flash",
+            contents=f"Simplify this medical text for a patient. Use simple words: {text}"
+        )
+        return response.text
+    except Exception as e:
+        # This catches the ClientError and explains it simply
+        if "403" in str(e):
+            return "❌ API Error: Permission Denied. Your API key might be restricted or inactive."
+        elif "429" in str(e):
+            return "⚠️ Quota full: Please wait 60 seconds and try again."
+        else:
+            return f"❌ AI Error: {str(e)}"
+
+# ─── 4. STYLING ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .main { background-color: #f8f9fa; }
     .stTextArea textarea { font-size: 1.1rem !important; }
-    .result-box { background-color: #ffffff; border: 1px solid #dee2e6; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .result-box { background-color: #ffffff; border: 1px solid #dee2e6; padding: 20px; border-radius: 10px; color: #1a5a50; }
     .step-header { color: #1a7a6e; font-weight: bold; margin-top: 20px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── 4. MAIN INTERFACE ──────────────────────────────────────────────────────
+# ─── 5. MAIN INTERFACE ──────────────────────────────────────────────────────
 st.title("🏥 MedSimplify")
-st.subheader("Translate Complex Medical Jargon into Plain English")
+st.subheader("Professional NLP Medical Simplifier")
 
-input_text = st.text_area("Paste medical abstract or clinical notes below:", height=200, placeholder="e.g., The patient presents with acute myocardial infarction...")
+input_text = st.text_area("Paste medical text below:", height=200, 
+                          placeholder="Example: The patient exhibits acute myocardial infarction...")
 
 if st.button("Simplify Medical Text", type="primary"):
     if input_text.strip():
-        # --- STAGE 1: THE AI OUTPUT (The User's Main Goal) ---
-        client = get_ai_client()
-        if client:
-            with st.spinner("Processing through NLP Pipeline..."):
-                response = client.models.generate_content(
-                    model="gemini-3.1-flash",
-                    contents=f"Simplify this medical text for a patient. Use simple words: {input_text}"
-                )
+        # RUN THE PIPELINE
+        with st.spinner("Running NLP Pipeline..."):
+            
+            # --- STAGE 1: AI OUTPUT ---
+            output = simplify_text(input_text)
+            st.markdown('<p class="step-header">✨ SIMPLIFIED VERSION</p>', unsafe_allow_html=True)
+            st.markdown(f'<div class="result-box">{output}</div>', unsafe_allow_html=True)
+            
+            st.divider()
+
+            # --- STAGE 2: NLP PROJECT PROOF (The Pipeline) ---
+            with st.expander("🔬 View Technical NLP Analysis (Pipeline Stages)"):
+                doc = nlp(input_text)
                 
-                st.markdown('<p class="step-header">✨ SIMPLIFIED VERSION</p>', unsafe_allow_html=True)
-                st.markdown(f'<div class="result-box">{response.text}</div>', unsafe_allow_html=True)
+                # 1. Tokenization & POS Tagging Table
+                nlp_data = []
+                for token in doc:
+                    nlp_data.append({
+                        "Token": token.text,
+                        "Lemma (Root)": token.lemma_,
+                        "POS Tag": token.pos_,
+                        "Description": spacy.explain(token.pos_)
+                    })
+                
+                st.write("**Stage 1-3: Tokenization, Lemmatization, & POS Tagging**")
+                st.dataframe(pd.DataFrame(nlp_data), use_container_width=True)
 
-        st.divider()
-
-        # --- STAGE 2: THE NLP PROJECT PROOF (Hidden in an Expander) ---
-        # This part makes it a "Project" without cluttering the screen for normal users
-        with st.expander("🔬 View NLP Pipeline Analysis (For Project Evaluation)"):
-            st.write("This section shows the technical processing steps performed on your input.")
-            
-            # NLP Step 1: Tokenization & POS Tagging
-            doc = nlp(input_text)
-            nlp_data = []
-            for token in doc:
-                nlp_data.append({
-                    "Token": token.text,
-                    "Lemma": token.lemma_,
-                    "POS": token.pos_,
-                    "Description": spacy.explain(token.pos_)
-                })
-            
-            st.write("**1. Tokenization & Part-of-Speech Tagging:**")
-            st.dataframe(pd.DataFrame(nlp_data), use_container_width=True)
-
-            # NLP Step 2: Jargon Identification
-            # We use length and POS to flag potential jargon
-            jargon_terms = [t.text for t in doc if len(t.text) > 8 and t.pos_ in ["NOUN", "ADJ"]]
-            st.write("**2. Identified Complex Jargon:**")
-            if jargon_terms:
-                st.info(", ".join(list(set(jargon_terms))))
-            else:
-                st.write("No high-complexity jargon detected.")
-
+                # 2. Jargon Detection
+                jargon_terms = [t.text for t in doc if len(t.text) > 8 and t.pos_ in ["NOUN", "ADJ"]]
+                st.write("**Stage 4: Jargon Entity Identification**")
+                if jargon_terms:
+                    st.info(", ".join(list(set(jargon_terms))))
+                else:
+                    st.write("No complex jargon detected.")
     else:
-        st.warning("Please enter some text first.")
+        st.warning("Please enter text first.")
 
-# ─── 5. FOOTER ──────────────────────────────────────────────────────────────
 st.markdown("---")
-st.caption("Powered by spaCy NLP and Google Gemini AI | Research Data: val.csv & jargon.json")
+st.caption("NLP Project Pipeline: spaCy + Gemini 3.1 | Data: val.csv, jargon.json")

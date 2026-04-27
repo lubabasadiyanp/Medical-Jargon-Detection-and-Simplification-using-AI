@@ -5,7 +5,8 @@ from google import genai
 import time
 
 # ─── 1. PAGE CONFIG ───
-st.set_page_config(page_title="MedSimplify AI", page_icon="🏥", layout="wide")import streamlit as st
+st.set_page_config(page_title="MedSimplify AI", page_icon="🏥", layout="wide")
+import streamlit as st
 import pandas as pd
 import spacy
 from google import genai

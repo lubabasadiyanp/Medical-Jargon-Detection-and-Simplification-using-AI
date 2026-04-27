@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import json
@@ -6,6 +7,13 @@ import re
 from nltk.stem import WordNetLemmatizer
 import nltk
 
+
+# These lines ensure the data is downloaded on the Streamlit server
+try:
+    nltk.data.find('corpora/wordnet')
+except LookupError:
+    nltk.download('wordnet')
+    nltk.download('omw-1.4')
 # Download necessary NLTK data
 nltk.download('wordnet')
 nltk.download('omw-1.4')

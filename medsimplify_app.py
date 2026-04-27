@@ -23,11 +23,35 @@ def load_resources():
 nlp, jargon_lookup = load_resources()
 
 @st.cache_resource
+@st.cache_resource
 def get_ai_client():
     api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key: return None
-    # Using v1beta version for better compatibility with free tier keys
-    return genai.Client(api_key=api_key.strip(), http_options={'api_version': 'v1beta'})
+    # Removed the v1beta option to allow the SDK to auto-select the best stable version
+    return genai.Client(api_key=api_key.strip())
+
+def simplify_text(text):
+    client = get_ai_client()
+    if not client:
+        return "❌ API Key Missing: Please add GEMINI_API_KEY to Streamlit Secrets."
+    
+    try:
+        # Standard stable model name
+        response = client.models.generate_content(
+            model="gemini-1.5-flash", 
+            contents=f"Simplify this medical text for a patient. Use simple words: {text}"
+        )
+        return response.text
+    except Exception as e:
+        # Fallback to the latest 2.0 version if 1.5 is somehow not visible to your key
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=f"Simplify this medical text for a patient: {text}"
+            )
+            return response.text
+        except:
+            return f"❌ AI Error: {str(e)}"
 def simplify_text(text):
     client = get_ai_client()
     if not client:

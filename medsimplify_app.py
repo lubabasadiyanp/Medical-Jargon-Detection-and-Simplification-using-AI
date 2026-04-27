@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import spacy
 import json
-from google import genai
-from google.genai import errors
+import google.generativeai as genai
 
 # ─── 1. PAGE SETUP ──────────────────────────────────────────────────────────
 st.set_page_config(page_title="MedSimplify — Professional NLP", page_icon="🏥")
@@ -11,7 +10,6 @@ st.set_page_config(page_title="MedSimplify — Professional NLP", page_icon="�
 # ─── 2. LOAD NLP MODELS & DATA ──────────────────────────────────────────────
 @st.cache_resource
 def load_resources():
-    # This handles the Tokenization, POS Tagging, and Lemmatization
     nlp = spacy.load("en_core_web_sm")
     try:
         with open("jargon.json", "r") as f:
@@ -22,60 +20,23 @@ def load_resources():
 
 nlp, jargon_lookup = load_resources()
 
-@st.cache_resource
-@st.cache_resource
-def get_ai_client():
+# ─── 3. THE SIMPLIFICATION FUNCTION (STABLE VERSION) ────────────────────────
+def simplify_text(text):
     api_key = st.secrets.get("GEMINI_API_KEY")
-    if not api_key: return None
-    # Removed the v1beta option to allow the SDK to auto-select the best stable version
-    return genai.Client(api_key=api_key.strip())
+    if not api_key:
+        return "❌ API Key Missing: Please add GEMINI_API_KEY to Streamlit Secrets."
+    
+    try:
+        genai.configure(api_key=api_key.strip())
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        response = model.generate_content(
+            f"Simplify this medical text for a patient. Use simple words: {text}"
+        )
+        return response.text
+    except Exception as e:
+        return f"❌ AI Error: {str(e)}"
 
-def simplify_text(text):
-    client = get_ai_client()
-    if not client:
-        return "❌ API Key Missing: Please add GEMINI_API_KEY to Streamlit Secrets."
-    
-    try:
-        # Standard stable model name
-        response = client.models.generate_content(
-            model="gemini-1.5-flash", 
-            contents=f"Simplify this medical text for a patient. Use simple words: {text}"
-        )
-        return response.text
-    except Exception as e:
-        # Fallback to the latest 2.0 version if 1.5 is somehow not visible to your key
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=f"Simplify this medical text for a patient: {text}"
-            )
-            return response.text
-        except:
-            return f"❌ AI Error: {str(e)}"
-def simplify_text(text):
-    client = get_ai_client()
-    if not client:
-        return "❌ API Key Missing: Please add GEMINI_API_KEY to Streamlit Secrets."
-    
-    try:
-        # Update: Added 'models/' prefix which is often required by the new SDK
-        response = client.models.generate_content(
-            model="models/gemini-1.5-flash", 
-            contents=f"Simplify this medical text for a patient. Use simple words: {text}"
-        )
-        return response.text
-    except Exception as e:
-        # If models/gemini-1.5-flash fails, try the short name as a backup
-        try:
-            response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=f"Simplify this medical text for a patient. Use simple words: {text}"
-            )
-            return response.text
-        except Exception as second_error:
-            if "404" in str(second_error):
-                return "❌ Model Error: Please ensure your API Key has access to Gemini 1.5 Flash in AI Studio."
-            return f"❌ AI Error: {str(second_error)}"
 # ─── 4. STYLING ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -94,7 +55,6 @@ input_text = st.text_area("Paste medical text below:", height=200,
 
 if st.button("Simplify Medical Text", type="primary"):
     if input_text.strip():
-        # RUN THE PIPELINE
         with st.spinner("Running NLP Pipeline..."):
             
             # --- STAGE 1: AI OUTPUT ---
@@ -132,4 +92,4 @@ if st.button("Simplify Medical Text", type="primary"):
         st.warning("Please enter text first.")
 
 st.markdown("---")
-st.caption("NLP Project Pipeline: spaCy + Gemini 3.1 | Data: val.csv, jargon.json")
+st.caption("NLP Project Pipeline: spaCy + Gemini 1.5 | Data: val.csv, jargon.json")

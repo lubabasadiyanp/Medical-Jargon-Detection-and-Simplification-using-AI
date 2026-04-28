@@ -1,1 +1,4 @@
 # Medical-Jargon-Detection-and-Simplification-using-AI
+streamlit>=1.32.0
+pandas>=1.5.0
+numpy>=1.24.0

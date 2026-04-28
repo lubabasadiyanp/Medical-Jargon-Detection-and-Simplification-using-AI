@@ -262,7 +262,7 @@ def highlight_jargon_html(text, detections):
         result += (
             f'<span style="background:{color};border-radius:4px;'
             f'padding:1px 4px;font-weight:600;" '
-            f'title="{d["class"]}: {d.get(\"simplification\",\"\")}"> '
+            f'title="{d["class"]}: {d.get("simplification","")}"> '
             f'{d["term"]}</span>'
         )
         prev = d["end"]
